@@ -24,29 +24,34 @@ const BASE=process.env.APP_URL || 'http://127.0.0.1:8443'
           if(document.querySelectorAll('.calibration-page [aria-current="step"]').length!==1)throw Error('Multiple active dots')
         }
         service.calibrate=async(target,opts)=>{
-          geometry(target);calibrationTest.train.push({target,group:opts.group})
+          geometry(target);calibrationTest.train.push({target,group:opts.group,settleMs:opts.settleMs,durationMs:opts.durationMs})
+          if(opts.group===2 && !calibrationTest.interrupted){calibrationTest.interrupted=true;service.set({face:{detected:true,facing:true,eyesOpen:true}});throw new module.AttentionLostError()}
           if(!calibrationTest.captureRetried){calibrationTest.captureRetried=true;throw new module.CalibrationCaptureError()}
           opts.onProgress?.(1,true);return 30
         }
-        service.fitCalibration=()=>{calibrationTest.fits++;return{samples:400,points:13,cvErrorPx:40,modelName:'simulated'}}
+        service.fitCalibration=()=>{calibrationTest.fits++;return{samples:400,points:9,cvErrorPx:40,modelName:'simulated'}}
         service.validate=async(target,opts)=>{
           geometry(target);const index=calibrationTest.checks.length
-          const error=index<5?127:recover?30:127
+          const error=recover?30:127
           calibrationTest.checks.push(target)
           service.validationDetails.push({...target,meanErrorPx:error,biasX:error,biasY:0,spreadPx:5,frames:12})
           opts.onProgress?.(1,true);return Array(12).fill(error)
         }
       },recover)
+      if(recover) await page.screenshot({path:'/private/tmp/blinkbridge-nine-point-calibration.png',fullPage:true})
       await page.getByRole('button',{name:'Start calibration',exact:true}).click()
       await page.getByRole('heading',{name:recover?'Calibration complete':'Calibration needs improvement',exact:true}).waitFor()
       const result=await page.evaluate(()=>({train:calibrationTest.train,checks:calibrationTest.checks,fits:calibrationTest.fits,state:calibrationTest.service.getState()}))
-      assert.equal(result.train.length,19,'13 initial targets, one capture retry and five refinement targets')
-      assert.equal(result.checks.length,10,'both checks have five targets')
-      assert.equal(result.fits,2)
-      assert.equal(result.state.calibration.refined,true)
+      assert.equal(result.train.length,11,'nine targets, one capture retry and one interrupted-dot retry')
+      assert.deepEqual(result.train.map(item=>item.group),[0,0,1,2,2,3,4,5,6,7,8],'interruption must resume the current dot rather than repeat completed dots')
+      assert.ok(result.train.every(item=>item.durationMs===1000 && item.settleMs===650),'short capture timings')
+      assert.equal(result.checks.length,5,'one independent five-target check')
+      assert.equal(result.fits,1)
+      assert.equal(result.state.calibration.refined,false)
+      assert.equal(result.state.calibration.points,9)
       assert.equal(result.state.calibrated,recover)
       assert.equal(result.state.calibration.validation.meanErrorPx,recover?30:127)
-      for(const target of result.checks.slice(5))assert.equal(result.train.some(item=>Math.hypot(item.target.x-target.x,item.target.y-target.y)<.001),false,'final check locations must remain outside training')
+      for(const target of result.checks)assert.equal(result.train.some(item=>Math.hypot(item.target.x-target.x,item.target.y-target.y)<.001),false,'final check locations must remain outside training')
       await page.getByText(/Largest error:/).waitFor()
       if(!recover) {
         const pending=page.waitForEvent('download')
@@ -94,6 +99,6 @@ const BASE=process.env.APP_URL || 'http://127.0.0.1:8443'
     assert.equal(capture.timedOut,true)
     assert.equal(capture.released,true)
     await capturePage.close()
-    console.log('PASS: rendered target coordinates, frame-capture retry, 13-point training, automatic refinement, fresh holdout check, recovery and rejection')
+    console.log('PASS: rendered target coordinates, frame-capture retry, nine-point training, no automatic refinement, independent holdout check, recovery and rejection')
   }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exit(1)})

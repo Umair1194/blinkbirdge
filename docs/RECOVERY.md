@@ -20,4 +20,4 @@ The partial dependency directory present before restoration is preserved at `.re
 
 Before restoration, TypeScript and the production build passed, all 18 core tests passed, and automated browser, tracking, precision-selection and calibration suites passed. Browser checks included responsive layouts and mocked speech/tracking flows. These checks do not establish real webcam gaze accuracy; that requires the user's camera and personal calibration.
 
-The restored calibration retains the previous flow. The requested shorter nine-point calibration remains a separate improvement, not a completed part of this recovery.
+The recovery initially retained the previous calibration flow. The subsequent nine-point update is documented in `CALIBRATION_NINE_POINT.md`.
