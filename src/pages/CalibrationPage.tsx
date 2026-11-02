@@ -25,9 +25,8 @@ import {
   AttentionLostError,
   CalibrationCaptureError,
   gazeService,
-  summarizeValidation,
 } from "../engine/gazeService"
-import { calibrationUsable } from '../engine/trackingQuality'
+import { calibrationFitUsable, calibrationUsable } from '../engine/trackingQuality'
 import type { ValidationResult } from "../engine/types"
 import { useGazeState } from "../hooks/useGaze"
 import { navigate } from "../lib/router"
@@ -38,16 +37,9 @@ const YS = [0.15, 0.5, 0.88]
 const GRID = YS.flatMap((y) => XS.map((x) => ({ x, y })))
 // Start at the centre and alternate across the screen to reduce order bias.
 const POINTS = [4, 0, 8, 2, 6, 1, 7, 3, 5].map(index => GRID[index])
-const VALIDATION = [
-  { x: 0.3, y: 0.32 },
-  { x: 0.7, y: 0.32 },
-  { x: 0.5, y: 0.55 },
-  { x: 0.3, y: 0.78 },
-  { x: 0.7, y: 0.78 },
-]
 const AUTO_START_S = 5
 
-type Phase = "intro" | "running" | "validating" | "interrupted" | "failed" | "done"
+type Phase = "intro" | "running" | "interrupted" | "failed" | "done"
 
 function quality(v: ValidationResult) {
   if (!calibrationUsable(v)) return { label: 'Needs retry', tone: 'bad', advice: 'The check did not establish reliable tracking. Eye selections stay off until a new calibration passes.' } as const
@@ -83,13 +75,11 @@ export function CalibrationPage() {
   const { updateSettings, settings, notify } = useApp()
   const [phase, setPhase] = useState<Phase>("intro")
   const [index, setIndex] = useState(0)
-  const [checkPoints, setCheckPoints] = useState(VALIDATION)
   const [progress, setProgress] = useState(0)
   const [attention, setAttention] = useState(true)
   const [countdown, setCountdown] = useState<number | null>(null)
   const [autoCancelled, setAutoCancelled] = useState(false)
   const abort = useRef<AbortController | null>(null)
-  const interruptedPhase = useRef<'running' | 'validating'>('running')
 
   const simulated = s.mode === "simulation"
   const ready = s.engine === "running" && (simulated || s.mode === "webcam")
@@ -113,11 +103,10 @@ export function CalibrationPage() {
       let samples = 0
       // Preserve completed dots when tracking briefly disappears. Only the
       // interrupted dot is collected again, so partial samples are never mixed.
-      const withResume = async <T,>(capture: () => Promise<T>, resumePhase: 'running' | 'validating'): Promise<T> => {
+      const withResume = async <T,>(capture: () => Promise<T>): Promise<T> => {
         while (true) {
           try { return await capture() } catch (error) {
             if (!(error instanceof AttentionLostError)) throw error
-            interruptedPhase.current = resumePhase
             setPhase('interrupted')
             let stableSince = 0
             while (true) {
@@ -131,7 +120,7 @@ export function CalibrationPage() {
             }
             setProgress(0)
             setAttention(true)
-            setPhase(resumePhase)
+            setPhase('running')
           }
         }
       }
@@ -150,7 +139,7 @@ export function CalibrationPage() {
             setProgress(0)
             try {
               samples += await withResume(async () => gazeService.calibrate(await visibleTarget(points[i]), {group:base+i, settleMs:650,
-                durationMs:1000, signal:ac.signal, onProgress}), 'running')
+                durationMs:1000, signal:ac.signal, onProgress}))
               break
             } catch (error) {
               if (!(error instanceof CalibrationCaptureError) || attempt === 1) throw error
@@ -159,29 +148,18 @@ export function CalibrationPage() {
           }
         }
       }
-      const check = async (points: {x:number;y:number}[]) => {
-        setCheckPoints(points)
-        gazeService.beginValidation()
-        setPhase('validating')
-        const errors: number[][] = []
-        for (let i=0; i<points.length; i++) {
-          setIndex(i); setProgress(0)
-          errors.push(await withResume(async () => gazeService.validate(await visibleTarget(points[i]), {group:200+i, settleMs:700,
-            durationMs:800, signal:ac.signal, onProgress}), 'validating'))
-        }
-        return summarizeValidation(errors, gazeService.getValidationDetails())
-      }
       await train(POINTS, 0)
-      let validation: ValidationResult | null = null
-      if (!sim) {
-        if (!gazeService.fitCalibration()) { setPhase('failed'); return }
-        validation = await check(VALIDATION)
-      }
+      // Let the last dot paint before model fitting. No further target visits.
+      await new Promise<void>(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)))
+      if (ac.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+      const fit = sim ? undefined : gazeService.fitCalibration() ?? undefined
+      if (!sim && !fit) { setPhase('failed'); return }
       gazeService.completeCalibration({
         points: POINTS.length,
         samples,
         simulated: sim,
-        validation,
+        validation: null,
+        fit,
         refined: false,
       })
       setPhase("done")
@@ -210,7 +188,7 @@ export function CalibrationPage() {
     if (phase === 'done' && !s.calibration) { setPhase('intro'); setAutoCancelled(true) }
   }, [phase, s.calibration])
   useEffect(() => {
-    if (phase !== 'running' && phase !== 'validating' && phase !== 'interrupted') return
+    if (phase !== 'running' && phase !== 'interrupted') return
     const onResize = () => { stop(); notify('The screen size changed. Restart calibration at this size.', 'info') }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
@@ -241,7 +219,6 @@ export function CalibrationPage() {
       if (
         e.key === "Escape" &&
         (phase === "running" ||
-          phase === "validating" ||
           phase === "interrupted")
       )
         stop()
@@ -258,16 +235,10 @@ export function CalibrationPage() {
     return () => window.removeEventListener("keydown", onKey)
   }, [phase, ready, faceReady, run, stop])
 
-  const validating = phase === "validating" || (phase === "interrupted" && interruptedPhase.current === "validating")
-  const shownPoints = validating ? checkPoints : POINTS
-  const total = shownPoints.length
-  const overall =
-    phase === "running" || (phase === "interrupted" && !validating)
-      ? (index + progress) / (simulated ? POINTS.length : POINTS.length + VALIDATION.length)
-      : validating
-        ? (POINTS.length + index + progress) / (POINTS.length + VALIDATION.length)
-        : 0
-  const active = phase === "running" || validating || phase === "interrupted"
+  const shownPoints = POINTS
+  const total = POINTS.length
+  const overall = (index + progress) / total
+  const active = phase === 'running' || phase === 'interrupted'
   const result = s.calibration
   const q = result?.validation ? quality(result.validation) : null
   const worst = result?.validation?.details?.slice().sort((a,b) => b.meanErrorPx - a.meanErrorPx)[0]
@@ -281,7 +252,7 @@ export function CalibrationPage() {
           <>
             <div className="hidden items-center gap-3 text-[15px] font-semibold text-ink sm:flex">
               <Crosshair aria-hidden className="size-5 text-brand" />
-              {validating ? "Checking accuracy" : "Calibrating"}
+              Calibrating
             </div>
             <div className="mx-auto flex min-w-0 flex-1 max-w-md items-center gap-3">
               <div
@@ -332,7 +303,7 @@ export function CalibrationPage() {
         )}
       </header>
 
-      {(phase === "running" || validating) && (
+      {phase === "running" && (
         <>
           <p
             data-calibration-instructions
@@ -343,8 +314,6 @@ export function CalibrationPage() {
               <span className="font-semibold text-warn">
                 Look back at the screen to continue
               </span>
-            ) : validating ? (
-              "Keep looking at each dot — we’re measuring how accurate tracking is"
             ) : (
               "Look only at the small centre dot. Its ring waits until enough eye frames are captured."
             )}
@@ -570,7 +539,7 @@ export function CalibrationPage() {
                   <p className="text-sm text-ink-2">
                     {!faceReady
                       ? "Calibration starts by itself as soon as we can see you looking at the screen."
-                      : "Usually 25–35 seconds: 9 dots, then a brief accuracy check. Slower cameras may need longer."}{" "}
+                      : "One pass, 9 dots. Usually 15–25 seconds; slower cameras may need longer."}{" "}
                     Press <Kbd>Space</Kbd> to start, <Kbd>Esc</Kbd> to stop.
                   </p>
                 </div>
@@ -632,7 +601,7 @@ export function CalibrationPage() {
 
             <div className="mx-auto mt-8 max-w-xl rounded-3xl border border-line bg-surface p-6 text-left">
               <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-ink-2">
-                Accuracy summary
+                Calibration summary
               </h2>
               {result.simulated ? (
                 <p className="mt-3 text-[15px] leading-relaxed text-ink">
@@ -642,6 +611,13 @@ export function CalibrationPage() {
                   The simulated cursor follows your mouse, so there’s no eye
                   data to validate.
                 </p>
+              ) : result.fit ? (
+                <>
+                  <p className="mt-3 text-lg font-semibold text-ink">{calibrationFitUsable(result.fit) ? 'Nine-dot calibration ready' : 'Eye data needs a clearer capture'}</p>
+                  <p className="mt-2 text-[15px] text-ink-2">One pass completed with {result.points} dots and {result.samples} camera frames. No second calibration layer.</p>
+                  <p className="mt-3 text-sm text-ink-2">Model consistency estimate: {Math.round(result.fit.cvErrorPx ?? 0)} px, calculated by holding out training targets. This is not an independent accuracy test.</p>
+                  <p className="mt-3 text-[15px] text-ink">{s.calibrated ? 'Try the keyboard and check the highlighted letter. Enlarged letter confirmation helps with neighbouring keys.' : 'The model could not map your eye movements consistently. Try even front lighting and keep a comfortable, steady position.'}</p>
+                </>
               ) : result.validation && q ? (
                 <>
                   <div className="mt-4 flex flex-wrap items-end gap-4">
@@ -699,7 +675,7 @@ export function CalibrationPage() {
               )}
             </div>
 
-            {!s.calibrated && <p role="alert" className="mt-5 rounded-2xl bg-warn/10 p-4 text-ink">Eye selections are off because the final check was incomplete or too far from the targets. The nine-point pass is finished; no extra rounds are started automatically. Try even front lighting and a comfortable, steady position before retrying. Clicking and physical typing still work.</p>}
+            {!s.calibrated && <p role="alert" className="mt-5 rounded-2xl bg-warn/10 p-4 text-ink">Eye selections are off because the captured eye data was not consistent enough. The nine-point pass is finished; no extra rounds are started automatically. Try even front lighting and a comfortable, steady position before retrying. Clicking and physical typing still work.</p>}
             <p className="mx-auto mt-6 max-w-xl text-[15px] text-ink-2">
               Your calibration is personal to your setup. You can recalibrate
               whenever you need.

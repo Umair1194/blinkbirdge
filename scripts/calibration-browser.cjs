@@ -29,7 +29,7 @@ const BASE=process.env.APP_URL || 'http://127.0.0.1:8443'
           if(!calibrationTest.captureRetried){calibrationTest.captureRetried=true;throw new module.CalibrationCaptureError()}
           opts.onProgress?.(1,true);return 30
         }
-        service.fitCalibration=()=>{calibrationTest.fits++;return{samples:400,points:9,cvErrorPx:40,modelName:'simulated'}}
+        service.fitCalibration=()=>{calibrationTest.fits++;return{samples:400,points:9,cvErrorPx:recover?40:180,modelName:'simulated'}}
         service.validate=async(target,opts)=>{
           geometry(target);const index=calibrationTest.checks.length
           const error=recover?30:127
@@ -45,14 +45,15 @@ const BASE=process.env.APP_URL || 'http://127.0.0.1:8443'
       assert.equal(result.train.length,11,'nine targets, one capture retry and one interrupted-dot retry')
       assert.deepEqual(result.train.map(item=>item.group),[0,0,1,2,2,3,4,5,6,7,8],'interruption must resume the current dot rather than repeat completed dots')
       assert.ok(result.train.every(item=>item.durationMs===1000 && item.settleMs===650),'short capture timings')
-      assert.equal(result.checks.length,5,'one independent five-target check')
+      assert.equal(result.checks.length,0,'no second dot sequence or validation visits')
       assert.equal(result.fits,1)
       assert.equal(result.state.calibration.refined,false)
       assert.equal(result.state.calibration.points,9)
       assert.equal(result.state.calibrated,recover)
-      assert.equal(result.state.calibration.validation.meanErrorPx,recover?30:127)
+      assert.equal(result.state.calibration.validation,null)
+      assert.equal(result.state.calibration.fit.cvErrorPx,recover?40:180)
       for(const target of result.checks)assert.equal(result.train.some(item=>Math.hypot(item.target.x-target.x,item.target.y-target.y)<.001),false,'final check locations must remain outside training')
-      await page.getByText(/Largest error:/).waitFor()
+      await page.getByText(/One pass completed with 9 dots/).waitFor()
       if(!recover) {
         const pending=page.waitForEvent('download')
         await page.getByRole('button',{name:'Save tracking report'}).click()
@@ -60,7 +61,7 @@ const BASE=process.env.APP_URL || 'http://127.0.0.1:8443'
         assert.equal(download.suggestedFilename(),'blinkbridge-tracking-report.json')
         const report=JSON.parse(require('node:fs').readFileSync(await download.path(),'utf8'))
         assert.equal(report.version,2)
-        assert.equal(report.calibration.validation.meanErrorPx,127)
+        assert.equal(report.calibration.fit.cvErrorPx,180)
       }
       // Keep this synthetic completed result visible for layout checks only.
       // The separate tracking suite verifies real viewport invalidation.
@@ -99,6 +100,6 @@ const BASE=process.env.APP_URL || 'http://127.0.0.1:8443'
     assert.equal(capture.timedOut,true)
     assert.equal(capture.released,true)
     await capturePage.close()
-    console.log('PASS: rendered target coordinates, frame-capture retry, nine-point training, no automatic refinement, independent holdout check, recovery and rejection')
+    console.log('PASS: rendered target coordinates, frame-capture retry, nine-point training, no automatic refinement, no second calibration layer, recovery and rejection')
   }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exit(1)})

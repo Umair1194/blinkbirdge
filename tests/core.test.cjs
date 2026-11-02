@@ -222,9 +222,9 @@ test('high smoothing bounds camera motion across a large jump and a short dropou
   const {GazeFilter}=source('src/engine/smoothing.ts');const filter=new GazeFilter()
   filter.push(200,200,0)
   let previous={x:200,y:200}
-  for(let i=1;i<25;i++){const point=filter.push(1200,700,i*33);assert.ok(Math.hypot(point.x-previous.x,point.y-previous.y)<=320*.033+.001);previous=point}
+  for(let i=1;i<25;i++){const point=filter.push(1200,700,i*33);assert.ok(Math.hypot(point.x-previous.x,point.y-previous.y)<=1800*.033+.001);previous=point}
   const recovered=filter.push(1200,700,1400)
-  assert.ok(Math.hypot(recovered.x-previous.x,recovered.y-previous.y)<=32.001)
+  assert.ok(Math.hypot(recovered.x-previous.x,recovered.y-previous.y)<=180.001)
 })
 
 test('iris height is normalised to each eye opening rather than a universal eye shape', () => {
@@ -247,6 +247,21 @@ test('accuracy measurement can bypass the display speed limit without changing t
   displayed.push(100,100,0);measured.push(100,100,0)
   let visual,measurement
   for(let i=1;i<=40;i++){visual=displayed.push(1000,100,i*33,true);measurement=measured.push(1000,100,i*33,false)}
-  assert.ok(visual.x<550,'display should still move slowly over a long distance')
+  assert.ok(visual.x>980,'a sustained gaze shift should reach the new fixation without seconds of lag')
   assert.ok(measurement.x>980,'the check should assess settled model error rather than intentional cursor lag')
 })
+
+ test('one-pass calibration requires all nine targets and a finite model-consistency estimate',()=>{
+ const {calibrationFitUsable}=source('src/engine/trackingQuality.ts')
+ const fit={points:9,samples:216,cvErrorPx:50}
+ assert.equal(calibrationFitUsable(fit),true)
+ for(const patch of [{points:8},{samples:50},{cvErrorPx:null},{cvErrorPx:NaN},{cvErrorPx:180}])assert.equal(calibrationFitUsable({...fit,...patch}),false)
+ })
+ test('confirmed gaze shifts settle quickly without allowing isolated spikes',()=>{
+ const {GazeFilter}=source('src/engine/smoothing.ts');const f=new GazeFilter()
+ for(let i=0;i<10;i++)f.push(200,200,i*33)
+ const spike=f.push(1200,700,330);assert.ok(Math.hypot(spike.x-200,spike.y-200)<1)
+ let point
+ for(let i=11;i<35;i++)point=f.push(1200,700,i*33)
+ assert.ok(Math.hypot(point.x-1200,point.y-700)<30,'settle a 1,100 px shift in under 800 ms')
+ })

@@ -22,7 +22,7 @@ const STEPS = [
   {
     icon: Crosshair,
     title: "Calibrate",
-    body: "Look at nine dots in turn, then follow a brief accuracy check. Usually this takes 25–35 seconds. Completed dots are kept if eye detection pauses; extra refinement rounds do not start automatically.",
+    body: "Look at nine dots in one pass, usually 15–25 seconds. Completed dots are kept if eye detection pauses. There is no second dot sequence.",
     route: "calibrate" as const,
   },
   {

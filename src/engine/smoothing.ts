@@ -24,6 +24,7 @@ export class GazeFilter {
   private previous: { x: number; y: number } | null = null
   private speed = 0
   private lastT = 0
+  private followingShift = false
 
   setLevel(level: SmoothingLevel) {
     this.preset = level === 'off' ? null : PRESETS[level]
@@ -36,6 +37,7 @@ export class GazeFilter {
     this.previous = null
     this.speed = 0
     this.lastT = 0
+    this.followingShift = false
   }
 
   push(x: number, y: number, t: number, limitMotion = true) {
@@ -61,11 +63,20 @@ export class GazeFilter {
     const velocity = Math.min(1200, Math.hypot(point.x - this.previous.x, point.y - this.previous.y) / dt)
     this.previous = point
     this.speed += alpha(1, dt) * (velocity - this.speed)
-    const cutoff = Math.min(p.maxCutoff, p.minCutoff + p.beta * this.speed)
+    // Confirm a new fixation with several agreeing, distinct input frames.
+    // A single bad frame cannot accelerate the cursor. Once confirmed, keep
+    // following until we reach it rather than crawling under the resting cap.
+    const recent = this.hist.slice(-3)
+    const coherent = recent.length === 3 && recent.every(h => Math.hypot(h.x - point.x, h.y - point.y) < 35)
+    const remaining = Math.hypot(point.x - this.out.x, point.y - this.out.y)
+    if (coherent && remaining > 90) this.followingShift = true
+    if (!coherent || remaining < 25) this.followingShift = false
+    const moving = limitMotion && this.followingShift
+    const cutoff = moving ? 8 : Math.min(p.maxCutoff, p.minCutoff + p.beta * this.speed)
     const k = alpha(cutoff, dt)
     let dx = k * (point.x - this.out.x), dy = k * (point.y - this.out.y)
     const distance = Math.hypot(dx, dy)
-    const maxStep = p.maxSpeed * dt
+    const maxStep = (moving ? 1800 : p.maxSpeed) * dt
     if (limitMotion && distance > maxStep) { dx *= maxStep / distance; dy *= maxStep / distance }
     return this.out = { x: this.out.x + dx, y: this.out.y + dy }
   }

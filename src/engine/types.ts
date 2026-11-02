@@ -61,6 +61,8 @@ export interface CalibrationResult {
   samples: number
   simulated: boolean
   refined?: boolean
+  /** Training-target cross-validation; not an independent accuracy measurement. */
+  fit?: CalibrationFit
   validation: ValidationResult | null
   completedAt: number
 }

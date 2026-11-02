@@ -1,5 +1,5 @@
 import { HeadStability, headPosition } from './headStability'
-import { calibrationUsable } from './trackingQuality'
+import { calibrationFitUsable, calibrationUsable } from './trackingQuality'
 import { CameraError, listCameras, requestCamera, stopStream } from "./camera"
 import { isFacing } from "./faceMetrics"
 import { SimulationAdapter } from "./simulationAdapter"
@@ -635,7 +635,7 @@ export class GazeService {
     this.calibratedViewport = { width: window.innerWidth, height: window.innerHeight }
     this.filter.reset()
     this.set({
-      calibrated: result.simulated || calibrationUsable(result.validation),
+      calibrated: result.simulated || (result.fit ? calibrationFitUsable(result.fit) : calibrationUsable(result.validation)),
       calibration: { ...result, completedAt: Date.now() },
       movedSinceCalibration: false,
     })
