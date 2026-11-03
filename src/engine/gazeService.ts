@@ -630,7 +630,7 @@ export class GazeService {
   }
 
   completeCalibration(result: Omit<CalibrationResult, "completedAt">) {
-    const r = this.finalReferenceSamples.length >= 8 ? this.finalReferenceSamples : this.referenceSamples
+    const r = this.finalReferenceSamples.length >= 8 ? this.finalReferenceSamples : result.fit ? this.referenceSamples.slice(-48) : this.referenceSamples
     this.headStability.calibrate(r)
     this.calibratedViewport = { width: window.innerWidth, height: window.innerHeight }
     this.filter.reset()
@@ -672,7 +672,7 @@ export class GazeService {
     return {
       selectionReady: this.canSelect(),
       positionCheck: this.headStability.diagnostics(),
-      calibration: this.state.calibration?.validation,
+      calibration: this.state.calibration?.fit ?? this.state.calibration?.validation,
       mode: this.state.mode,
       engine: this.state.engine,
       ...(this.adapter?.getStats?.() ?? {}),

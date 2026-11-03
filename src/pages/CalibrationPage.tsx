@@ -701,6 +701,9 @@ export function CalibrationPage() {
               >
                 Recalibrate
               </GazeButton>
+              {!s.calibrated && <button type="button" className={buttonClass('secondary', 'lg')} onClick={() => navigate('setup')}>
+                <Camera className="size-5" /> Check camera setup
+              </button>}
             </div>
             {!result.simulated && !s.calibrated && <div className="mt-5">
               <button type="button" className={buttonClass('secondary')} onClick={() => {

@@ -265,3 +265,34 @@ test('accuracy measurement can bypass the display speed limit without changing t
  for(let i=11;i<35;i++)point=f.push(1200,700,i*33)
  assert.ok(Math.hypot(point.x-1200,point.y-700)<30,'settle a 1,100 px shift in under 800 ms')
  })
+
+test('personal mapping can use a reliable eye for each axis when other cues are noisy',()=>{
+  const {fitPersonal,predictPersonal}=source('src/engine/personalModel.ts')
+  const {FEATURE_SCALE_FLOORS}=source('src/engine/faceMetrics.ts')
+  const features=(u,v,frame)=>{
+    const f=Float64Array.from({length:28},(_,i)=>.2*Math.sin(frame*1.73+i*2.9))
+    f[10]=u*.3;f[25]=v*.35
+    return f
+  }
+  const samples=[];let group=0
+  for(const u of [-1,0,1])for(const v of [-1,0,1]){
+    for(let i=0;i<24;i++)samples.push({features:features(u,v,group*24+i),x:700+500*u,y:450+300*v,group,weight:1})
+    group++
+  }
+  const model=fitPersonal(samples,FEATURE_SCALE_FLOORS)
+  assert.ok(model?.axes,'separate cues should outperform forcing both axes into one feature set')
+  assert.ok(model.cvErrorPx<15)
+  const point=predictPersonal(model,features(.4,-.3,501))
+  assert.ok(Math.hypot(point.x-900,point.y-360)<20)
+})
+
+test('calibration captures stable fixations and rejects transitional or invalid eye frames',()=>{
+  const {CalibrationStability}=source('src/engine/calibrationStability.ts'),capture=new CalibrationStability()
+  for(let i=0;i<12;i++)assert.equal(capture.push(i*.04,i*.025),false)
+  for(let i=0;i<4;i++)assert.equal(capture.push(.1,.03),false)
+  assert.equal(capture.push(.1,.03),true)
+  assert.equal(capture.push(NaN,.03),false)
+  assert.equal(capture.push(.1,.03),false,'a dropout must require a new stable window')
+  capture.reset()
+  assert.equal(capture.push(.1,.03),false)
+})

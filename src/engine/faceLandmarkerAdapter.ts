@@ -1,3 +1,4 @@
+import { CalibrationStability } from './calibrationStability'
 import { EyeOpenness } from './eyeOpenness'
 import type {
   FaceLandmarker,
@@ -107,6 +108,7 @@ export class FaceLandmarkerAdapter implements GazeAdapter {
   private recent: { t: number; f: Float64Array }[] = []
   private calibTarget: CalibrationTargetPx | null = null
   private calibSamples: TrainingSample[] = []
+  private captureStability = new CalibrationStability()
   private trainingCalib: TrainingSample[] = []
   private reinforceSamples: TrainingSample[] = []
   private model: PersonalModel | null = null
@@ -349,18 +351,19 @@ export class FaceLandmarkerAdapter implements GazeAdapter {
     this.metricsListener(metrics)
 
     // Hold the last estimate through blinks: the iris isn't visible then.
-    if (eyesClosed) return
+    if (eyesClosed) { this.captureStability.reset(); return }
     if (!isFacing(metrics)) {
+      this.captureStability.reset()
       this.gazeListener(null)
       return
     }
     const feats = gazeFeatures(p, blend, head, raw)
-    if (!feats) { this.gazeListener(null); return }
+    if (!feats) { this.captureStability.reset(); this.gazeListener(null); return }
 
     this.recent.push({ t: now, f: feats })
     while (this.recent.length && now - this.recent[0].t > RECENT_MS)
       this.recent.shift()
-    if (this.calibTarget) {
+    if (this.calibTarget && this.captureStability.push(feats[U_INDEX], feats[V_INDEX])) {
       const { x, y, group } = this.calibTarget
       this.calibSamples.push({ features: feats, x, y, weight: 1, group })
     }
@@ -441,10 +444,12 @@ export class FaceLandmarkerAdapter implements GazeAdapter {
 
   // ---- Calibration -------------------------------------------------------------
   setCalibrationTarget(target: CalibrationTargetPx | null) {
+    if (!target || target.group !== this.calibTarget?.group) this.captureStability.reset()
     this.calibTarget = target
   }
 
   clearCalibrationGroup(group: number) {
+    this.captureStability.reset()
     this.calibSamples = this.calibSamples.filter(sample => sample.group !== group)
   }
 
@@ -568,6 +573,7 @@ export class FaceLandmarkerAdapter implements GazeAdapter {
   }
 
   clearCalibration() {
+    this.captureStability.reset()
     this.model = null
     this.calibTarget = null
     this.calibSamples = []

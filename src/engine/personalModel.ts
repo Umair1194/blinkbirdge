@@ -6,7 +6,10 @@ export interface PersonalModel {
   alpha: number
   cvErrorPx: number
   name: string
+  axes?: { x: AxisModel; y: AxisModel }
 }
+
+interface AxisModel { indices: number[]; ridge: RidgeModel; alpha: number; residuals: number[] }
 
 const CANDIDATES = [
   { name: 'iris average', indices: [8, 9] },
@@ -52,12 +55,16 @@ function balanced(groups: TrainingSample[][], indices: number[]): TrainingSample
 }
 
 export function predictPersonal(model: PersonalModel, features: Float64Array) {
+  if (model.axes) return {
+    x: predictRidge(model.axes.x.ridge, project(features, model.axes.x.indices)).x,
+    y: predictRidge(model.axes.y.ridge, project(features, model.axes.y.indices)).y,
+  }
   return predictRidge(model.ridge, project(features, model.indices))
 }
 
 /** Use only training-target cross-validation to choose feature family and penalty.
- * Standardisation is refitted inside every fold. The independent screen check
- * remains untouched and is the final authority for enabling selections. */
+ * Standardisation is refitted inside every fold. Scores describe training-target
+ * consistency; they are not independently measured screen accuracy. */
 export function fitPersonal(samples: TrainingSample[], floors: Float64Array): PersonalModel | null {
   const groups = groupsOf(samples)
   if (groups.length < 5) return null
@@ -86,11 +93,57 @@ export function fitPersonal(samples: TrainingSample[], floors: Float64Array): Pe
       if (ridge) best = {...candidate, ridge, alpha, cvErrorPx: score}
     }
   }
+  // A weak/noisy eye or vertical cue must not force the horizontal axis to
+  // use the same features. Compare independent axis models on the same folds.
+  const x = fitAxis(groups, floors, 'x', [[8],[0],[4],[0,4],[10,11],[8,14],[8,9,20,21,22]])
+  const y = fitAxis(groups, floors, 'y', [[9],[1],[5],[27],[25],[26],[3,7],[12,13],[9,15],[27,15]])
+  if (x && y) {
+    let offset=0, score=0
+    for (const group of groups) {
+      let error=0
+      for (let i=0;i<group.length;i++,offset++) error+=Math.hypot(x.residuals[offset],y.residuals[offset])
+      score+=error/group.length
+    }
+    score/=groups.length
+    if (Number.isFinite(score) && (!best || score < best.cvErrorPx * .97)) {
+      best = {indices:x.indices, ridge:x.ridge, alpha:x.alpha, cvErrorPx:score, name:'personal horizontal / vertical cues', axes:{x,y}}
+    }
+  }
+  return best
+}
+
+function fitAxis(groups: TrainingSample[][], floors: Float64Array, axis: 'x'|'y', candidates: number[][]): AxisModel | null {
+  let best: AxisModel | null = null, bestScore = Infinity
+  for (const indices of candidates) {
+    if (indices.length >= groups.length - 1 || indices.some(index => index >= groups[0][0].features.length)) continue
+    const scaleFloors = Float64Array.from(indices.map(index => floors[index]))
+    for (const alpha of ALPHAS) {
+      const residuals: number[] = []
+      let complete = true
+      for (let held=0;held<groups.length;held++) {
+        const model = fitRidge(balanced(groups.filter((_,i)=>i!==held),indices),alpha,scaleFloors)
+        if (!model) {complete=false;break}
+        // Each target has equal influence even at different camera frame rates.
+        const errors = groups[held].map(sample=>predictRidge(model,project(sample.features,indices))[axis]-sample[axis])
+        residuals.push(...errors.map(error=>error / errors.length))
+      }
+      if (!complete) continue
+      const score = residuals.reduce((sum,error)=>sum+Math.abs(error),0)
+      if (!Number.isFinite(score) || score>=bestScore*.97) continue
+      const ridge=fitRidge(balanced(groups,indices),alpha,scaleFloors)
+      if (ridge) {best={indices,ridge,alpha,residuals};bestScore=score}
+    }
+  }
+  // Restore per-frame errors for Euclidean scoring with equal target weights.
+  if (best) {let offset=0;for(const group of groups){for(let i=0;i<group.length;i++)best.residuals[offset++]*=group.length}}
   return best
 }
 
 export function refitPersonal(model: PersonalModel, samples: TrainingSample[], floors: Float64Array) {
   const ridge = fitRidge(balanced(groupsOf(samples), model.indices), model.alpha,
     Float64Array.from(model.indices.map(index => floors[index])))
-  return ridge ? {...model, ridge} : model
+  if (!ridge) return model
+  if (!model.axes) return {...model,ridge}
+  const update = (axis: AxisModel) => ({...axis, ridge:fitRidge(balanced(groupsOf(samples),axis.indices),axis.alpha,Float64Array.from(axis.indices.map(index=>floors[index]))) ?? axis.ridge})
+  return {...model,ridge,axes:{x:update(model.axes.x),y:update(model.axes.y)}}
 }
