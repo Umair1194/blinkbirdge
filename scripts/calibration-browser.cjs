@@ -5,12 +5,13 @@ const BASE=process.env.APP_URL || 'http://127.0.0.1:8443'
 ;(async()=>{
   const browser=await chromium.launch({headless:true,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{})})
   try {
-    for(const recover of [true,false]) {
+    for(const errorCV of [40,148,301]) {
+      const recover=errorCV<=200
       const page=await browser.newPage({viewport:{width:1280,height:900}})
       const errors=[];page.on('pageerror',e=>errors.push(e.message))
       await page.addInitScript(()=>{localStorage.setItem('gesture-playground:onboarded','true');localStorage.setItem('gesture-playground:guideSeen','true')})
       await page.goto(BASE+'/#/calibrate')
-      await page.evaluate(async recover=>{
+      await page.evaluate(async ({recover,errorCV})=>{
         const module=await import(performance.getEntriesByType('resource').find(entry=>entry.name.includes('/src/engine/gazeService.ts')).name)
         const service=module.gazeService
         service.stopTracking()
@@ -29,7 +30,7 @@ const BASE=process.env.APP_URL || 'http://127.0.0.1:8443'
           if(!calibrationTest.captureRetried){calibrationTest.captureRetried=true;throw new module.CalibrationCaptureError()}
           opts.onProgress?.(1,true);return 30
         }
-        service.fitCalibration=()=>{calibrationTest.fits++;return{samples:400,points:9,cvErrorPx:recover?40:180,modelName:'simulated'}}
+        service.fitCalibration=()=>{calibrationTest.fits++;return{samples:400,points:9,cvErrorPx:errorCV,modelName:'simulated'}}
         service.validate=async(target,opts)=>{
           geometry(target);const index=calibrationTest.checks.length
           const error=recover?30:127
@@ -37,10 +38,10 @@ const BASE=process.env.APP_URL || 'http://127.0.0.1:8443'
           service.validationDetails.push({...target,meanErrorPx:error,biasX:error,biasY:0,spreadPx:5,frames:12})
           opts.onProgress?.(1,true);return Array(12).fill(error)
         }
-      },recover)
+      },{recover,errorCV})
       if(recover) await page.screenshot({path:'/private/tmp/blinkbridge-nine-point-calibration.png',fullPage:true})
       await page.getByRole('button',{name:'Start calibration',exact:true}).click()
-      await page.getByRole('heading',{name:recover?'Calibration complete':'Calibration needs improvement',exact:true}).waitFor()
+      await page.getByRole('heading',{name:errorCV===148?'Large-target gaze typing':recover?'Keyboard workspace':'Calibration needs improvement',exact:true}).waitFor()
       const result=await page.evaluate(()=>({train:calibrationTest.train,checks:calibrationTest.checks,fits:calibrationTest.fits,state:calibrationTest.service.getState()}))
       assert.equal(result.train.length,11,'nine targets, one capture retry and one interrupted-dot retry')
       assert.deepEqual(result.train.map(item=>item.group),[0,0,1,2,2,3,4,5,6,7,8],'interruption must resume the current dot rather than repeat completed dots')
@@ -51,9 +52,10 @@ const BASE=process.env.APP_URL || 'http://127.0.0.1:8443'
       assert.equal(result.state.calibration.points,9)
       assert.equal(result.state.calibrated,recover)
       assert.equal(result.state.calibration.validation,null)
-      assert.equal(result.state.calibration.fit.cvErrorPx,recover?40:180)
+      assert.equal(result.state.calibration.fit.cvErrorPx,errorCV)
+      assert.equal(result.state.calibration.assisted,errorCV===148)
       for(const target of result.checks)assert.equal(result.train.some(item=>Math.hypot(item.target.x-target.x,item.target.y-target.y)<.001),false,'final check locations must remain outside training')
-      await page.getByText(/One pass completed with 9 dots/).waitFor()
+      if(!recover) await page.getByText(/One pass completed with 9 dots/).waitFor()
       if(!recover) {
         const pending=page.waitForEvent('download')
         await page.getByRole('button',{name:'Save tracking report'}).click()
@@ -61,7 +63,7 @@ const BASE=process.env.APP_URL || 'http://127.0.0.1:8443'
         assert.equal(download.suggestedFilename(),'blinkbridge-tracking-report.json')
         const report=JSON.parse(require('node:fs').readFileSync(await download.path(),'utf8'))
         assert.equal(report.version,2)
-        assert.equal(report.calibration.fit.cvErrorPx,180)
+        assert.equal(report.calibration.fit.cvErrorPx,301)
       }
       // Keep this synthetic completed result visible for layout checks only.
       // The separate tracking suite verifies real viewport invalidation.

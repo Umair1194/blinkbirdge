@@ -163,6 +163,7 @@ export function CalibrationPage() {
         refined: false,
       })
       setPhase("done")
+      if (gazeService.getState().calibrated) navigate("workspace")
     } catch (e) {
       if (e instanceof AttentionLostError) {
         if (abort.current === ac) setPhase("interrupted")
@@ -596,7 +597,7 @@ export function CalibrationPage() {
               {s.calibrated ? <CheckCircle2 aria-hidden className="size-9" /> : <TriangleAlert aria-hidden className="size-9" />}
             </div>
             <h1 className="mt-6 text-[40px] font-bold leading-tight tracking-tight text-ink">
-              {s.calibrated ? "Calibration complete" : "Calibration needs improvement"}
+              {result.assisted ? "Ready with large targets" : s.calibrated ? "Calibration complete" : "Calibration needs improvement"}
             </h1>
 
             <div className="mx-auto mt-8 max-w-xl rounded-3xl border border-line bg-surface p-6 text-left">
@@ -613,10 +614,10 @@ export function CalibrationPage() {
                 </p>
               ) : result.fit ? (
                 <>
-                  <p className="mt-3 text-lg font-semibold text-ink">{calibrationFitUsable(result.fit) ? 'Nine-dot calibration ready' : 'Eye data needs a clearer capture'}</p>
+                  <p className="mt-3 text-lg font-semibold text-ink">{result.assisted ? 'Large-target gaze typing available' : calibrationFitUsable(result.fit) ? 'Nine-dot calibration ready' : 'Eye data needs a clearer capture'}</p>
                   <p className="mt-2 text-[15px] text-ink-2">One pass completed with {result.points} dots and {result.samples} camera frames. No second calibration layer.</p>
                   <p className="mt-3 text-sm text-ink-2">Model consistency estimate: {Math.round(result.fit.cvErrorPx ?? 0)} px, calculated by holding out training targets. This is not an independent accuracy test.</p>
-                  <p className="mt-3 text-[15px] text-ink">{s.calibrated ? 'Try the keyboard and check the highlighted letter. Enlarged letter confirmation helps with neighbouring keys.' : 'The model could not map your eye movements consistently. Try even front lighting and keep a comfortable, steady position.'}</p>
+                  <p className="mt-3 text-[15px] text-ink">{result.assisted ? 'Tracking is too coarse for small keys. Use two large choices at a time to build your message. This is assisted tracking, not precise letter tracking.' : s.calibrated ? 'Try the keyboard and check the highlighted letter. Enlarged letter confirmation helps with neighbouring keys.' : 'The model could not map your eye movements consistently. Try even front lighting and keep a comfortable, steady position.'}</p>
                 </>
               ) : result.validation && q ? (
                 <>
@@ -690,7 +691,7 @@ export function CalibrationPage() {
                 onActivate={() => navigate("workspace")}
                 className="w-full sm:w-auto sm:min-w-64"
               >
-                {s.calibrated ? "Start typing" : "Use clicks"}
+                {result.assisted ? "Open assisted keyboard" : s.calibrated ? "Start typing" : "Use clicks"}
               </GazeButton>
               <GazeButton
                 gazeId="calibration-redo"

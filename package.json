@@ -14,7 +14,8 @@
     "test:browser": "node scripts/audit-browser.cjs",
     "test:tracking": "node scripts/tracking-browser.cjs",
     "test:calibration": "node scripts/calibration-browser.cjs",
-    "test:precision": "node scripts/precision-browser.cjs"
+    "test:precision": "node scripts/precision-browser.cjs",
+    "test:assisted": "node scripts/assisted-browser.cjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.2.0",

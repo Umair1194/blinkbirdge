@@ -1,3 +1,4 @@
+import { AssistedKeyboard } from './components/AssistedKeyboard'
 import { useEffect, useRef, useState } from "react"
 import { ApplicationSidebar } from "./components/ApplicationSidebar"
 import { BreakReminder } from "./components/BreakReminder"
@@ -164,7 +165,7 @@ function Shell() {
         <div className="flex min-w-0 flex-1 flex-col">
           <TopNavigation title={title} subtitle={subtitle} />
           <main id="main" tabIndex={-1} className="flex-1">
-            {route === "workspace" && <WorkspacePage />}
+            {route === "workspace" && (s.calibration?.assisted ? <AssistedKeyboard /> : <WorkspacePage />)}
             {route === "setup" && <CameraSetupPage />}
             {route === "phrases" && <SavedMessagesPage />}
             {route === "history" && <HistoryPage />}

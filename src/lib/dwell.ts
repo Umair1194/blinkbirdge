@@ -155,6 +155,8 @@ class DwellController {
     scope.querySelectorAll<HTMLElement>('[data-gaze-id]').forEach((el) => {
       const id = el.dataset.gazeId
       if (!id || el.dataset.gazeDisabled === 'true') return
+      // A coarse fit never arms ordinary letter keys or small toolbar buttons.
+      if (gazeService.getState().calibration?.assisted && el.dataset.gazeAssisted !== 'true') return
       let like = 0
       if (x !== null && y !== null) {
         const r = el.getBoundingClientRect()

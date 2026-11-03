@@ -15,3 +15,10 @@ export function calibrationFitUsable(fit: CalibrationFit | undefined) {
     && typeof fit.cvErrorPx === 'number' && Number.isFinite(fit.cvErrorPx)
     && fit.cvErrorPx >= 0 && fit.cvErrorPx <= 100
 }
+
+/** Coarse fits may operate only the explicitly enlarged, assisted targets. */
+export function calibrationAssistedUsable(fit: CalibrationFit | undefined) {
+  return !!fit && fit.points >= 9 && fit.samples >= 108
+    && typeof fit.cvErrorPx === 'number' && Number.isFinite(fit.cvErrorPx)
+    && fit.cvErrorPx > 100 && fit.cvErrorPx <= 200
+}

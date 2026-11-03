@@ -296,3 +296,11 @@ test('calibration captures stable fixations and rejects transitional or invalid 
   capture.reset()
   assert.equal(capture.push(.1,.03),false)
 })
+
+test('a 148 px fit uses assisted targets while poor or incomplete captures stay disabled',()=>{
+ const {calibrationAssistedUsable,calibrationFitUsable}=source('src/engine/trackingQuality.ts')
+ const fit={points:9,samples:229,cvErrorPx:148}
+ assert.equal(calibrationFitUsable(fit),false)
+ assert.equal(calibrationAssistedUsable(fit),true)
+ for(const patch of [{points:8},{samples:50},{cvErrorPx:301},{cvErrorPx:NaN},{cvErrorPx:null}])assert.equal(calibrationAssistedUsable({...fit,...patch}),false)
+})
